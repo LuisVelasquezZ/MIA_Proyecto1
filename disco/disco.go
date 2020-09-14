@@ -9,6 +9,7 @@ import (
 	"log"
 	"math/big"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -41,6 +42,13 @@ type EBR struct {
 	part_size   int64
 	part_next   int64
 	part_name   []byte
+}
+
+type MOUNTPart struct {
+	id        []byte
+	particion Particion
+	ebr       EBR
+	pathM     string
 }
 
 func MKDISK(commandArray []string) {
@@ -574,22 +582,22 @@ func FDISK(commandArray []string) {
 				e := EBR{}
 				//start donde inicia el primer EBR
 				var start int64 = 0
-				var sizeextend int64 = 0
 				var espacioDisponibleExtended int64 = 0
+				extended := Particion{}
 				//sizeextend
 				switch patrExtendida {
 				case 1:
 					start = int64(unsafe.Sizeof(m))
-					sizeextend = m.particion1.part_size
+					extended = m.particion1
 				case 2:
 					start = int64(unsafe.Sizeof(m)) + int64(part1size)
-					sizeextend = m.particion2.part_size
+					extended = m.particion2
 				case 3:
 					start = int64(unsafe.Sizeof(m)) + int64(part1size) + int64(part2size)
-					sizeextend = m.particion3.part_size
+					extended = m.particion3
 				case 4:
 					start = int64(unsafe.Sizeof(m)) + int64(part1size) + int64(part2size) + int64(part3size)
-					sizeextend = m.particion4.part_size
+					extended = m.particion4
 				default:
 				}
 
@@ -599,22 +607,28 @@ func FDISK(commandArray []string) {
 				dataEBR := leerBytes(file, sizeEBR)
 				bufferEBR := bytes.NewBuffer(dataEBR)
 				err = binary.Read(bufferEBR, binary.BigEndian, &e)
-				espacioDisponibleExtended = sizeextend
 				if err != nil {
 					log.Fatal("binary.Read failed", err)
 				}
 				for {
 					if e.part_next != -1 {
-						espacioDisponibleExtended -= e.part_size
-						file.Seek(e.part_next, 0)
-						data = leerBytes(file, sizeEBR)
-						err = binary.Read(bufferEBR, binary.BigEndian, &e)
+						if (e.part_next - (e.part_start + e.part_size)) >= val {
+							espacioDisponible = int(e.part_next - (e.part_start + e.part_size))
+							break
+						} else {
+							file.Seek(e.part_next, 0)
+							data = leerBytes(file, sizeEBR)
+							err = binary.Read(bufferEBR, binary.BigEndian, &e)
+						}
+
 					} else {
+						espacioDisponible = int((extended.part_start + extended.part_size) - (e.part_start + e.part_size))
 						break
 					}
 
 				}
 				if espacioDisponibleExtended >= val {
+					e.part_next = e.part_start + e.part_size
 					file.Seek(e.part_start, 0)
 					valoresPartLogicaanterior := &e
 					var binarioLogicaA bytes.Buffer
@@ -727,21 +741,21 @@ func FDISK(commandArray []string) {
 					ebrAnterior := EBR{}
 					//start donde inicia el primer EBR
 					var start int64 = 0
-					var sizeextend int64 = 0
+					//var sizeextend int64 = 0
 					//sizeextend
 					switch patrExtendida {
 					case 1:
 						start = int64(unsafe.Sizeof(m))
-						sizeextend = m.particion1.part_size
+						//sizeextend = m.particion1.part_size
 					case 2:
 						start = int64(unsafe.Sizeof(m)) + int64(part1size)
-						sizeextend = m.particion2.part_size
+						//sizeextend = m.particion2.part_size
 					case 3:
 						start = int64(unsafe.Sizeof(m)) + int64(part1size) + int64(part2size)
-						sizeextend = m.particion3.part_size
+						//sizeextend = m.particion3.part_size
 					case 4:
 						start = int64(unsafe.Sizeof(m)) + int64(part1size) + int64(part2size) + int64(part3size)
-						sizeextend = m.particion4.part_size
+						//sizeextend = m.particion4.part_size
 					default:
 					}
 
@@ -763,7 +777,6 @@ func FDISK(commandArray []string) {
 								err = binary.Read(bufferEBR, binary.BigEndian, &e)
 							} else {
 								fmt.Println("Particion no encontrada")
-								break
 								return
 							}
 						} else {
@@ -771,34 +784,21 @@ func FDISK(commandArray []string) {
 						}
 
 					}
-
-					file.Seek(e.part_start, 0)
-					valoresPartLogicaanterior := &e
-					var binarioLogicaA bytes.Buffer
-					binary.Write(&binarioLogicaA, binary.BigEndian, valoresPartLogicaanterior)
-
-					start = e.part_start + e.part_size
-					fitEbr := ' '
-					if fit == "bf" {
-						fitEbr = 'b'
-					} else if fit == "ff" {
-						fitEbr = 'f'
-					} else if fit == "wf" {
-						fitEbr = 'w'
+					if fit == "fast" {
+						ebrAnterior.part_next = e.part_next
+						file.Seek(ebrAnterior.part_start, 0)
+						valoresPartLogicaanterior := &ebrAnterior
+						var binarioLogicaA bytes.Buffer
+						binary.Write(&binarioLogicaA, binary.BigEndian, valoresPartLogicaanterior)
+					} else if fit == "full" {
+						var vacio int8 = 0
+						vaciando := &vacio
+						var binarioVaciando bytes.Buffer
+						for i := e.part_start; i < e.part_size; i++ {
+							file.Seek(i, 0)
+							binary.Write(&binarioVaciando, binary.BigEndian, vaciando)
+						}
 					}
-					part := EBR{
-						part_status: '1',
-						part_fit:    byte(fitEbr),
-						part_start:  start,
-						part_size:   val,
-						part_name:   name,
-						part_next:   -1,
-					}
-					file.Seek(start, 0)
-					valoresPartLogicanueva := &part
-					var binarioLogicaN bytes.Buffer
-					binary.Write(&binarioLogicaN, binary.BigEndian, valoresPartLogicanueva)
-
 				} else {
 					fmt.Println("No se encontro particion")
 					return
@@ -847,5 +847,209 @@ func newCryptoRand() int64 {
 }
 
 func graficar() {
-	//comando := exec.Command("dot ejemplo1.dot -o ejemplo1.png -Tpng -Gcharset=utf8")
+	//comando :=
+
+	exec.Command("dot ejemplo1.dot -o ejemplo1.png -Tpng -Gcharset=utf8")
+
+}
+
+func MOUNT(commandArray []string, particionesMontadas []MOUNTPart) []MOUNTPart {
+	pathval := false
+	nameval := false
+	path := ""
+	name := []byte("")
+	var add int64 = 0
+	//leyendo atributos del comando
+	for i := 1; i < len(commandArray); i++ {
+		tmp := strings.Split(commandArray[i], "->")
+		if tmp[0] == "-path" {
+			pathval = true
+			if tmp[1][0] == '"' {
+				path = tmp[1] + " " + commandArray[i+1]
+				path = strings.Trim(path, "\"")
+				i++
+			} else {
+				path = tmp[1]
+			}
+			_, err := os.Stat(path)
+			if os.IsNotExist(err) {
+				fmt.Println("Archivo no encontrado")
+				return particionesMontadas
+			}
+		} else if tmp[0] == "-name" {
+			nameval = true
+			name = []byte(tmp[1])
+		}
+	}
+
+	//verificando comandos obligatoiros
+	if pathval && nameval {
+
+		//verificando disco
+		file, err := os.Open(path)
+		defer file.Close()
+		if err != nil {
+			log.Fatal(err)
+		}
+		//cargando MBR
+		m := MBR{}
+		var sizeMBR int = int(unsafe.Sizeof(m))
+		data := leerBytes(file, sizeMBR)
+		buffer := bytes.NewBuffer(data)
+
+		err = binary.Read(buffer, binary.BigEndian, &m)
+		if err != nil {
+			log.Fatal("binary.Read failed", err)
+		}
+
+		encontrada := false
+		p := Particion{}
+		l := EBR{}
+		patrExtendida := 0
+		cantParticionExtendida := 0
+		var part1size int64 = 0
+		var part2size int64 = 0
+		var part3size int64 = 0
+		if &m.particion1 != nil {
+			part1size = m.particion1.part_size
+			if bytes.Compare(name, m.particion1.part_name) == 0 {
+				encontrada = true
+				p = m.particion1
+			}
+			if m.particion1.part_type == 'e' {
+				patrExtendida = 1
+				cantParticionExtendida++
+			}
+		}
+		if &m.particion2 != nil {
+			part1size = m.particion2.part_size
+			if bytes.Compare(name, m.particion2.part_name) == 0 {
+				p = m.particion2
+				encontrada = true
+			}
+			if m.particion1.part_type == 'e' {
+				patrExtendida = 2
+				cantParticionExtendida++
+			}
+
+		}
+		if &m.particion3 != nil {
+			part1size = m.particion3.part_size
+			if bytes.Compare(name, m.particion3.part_name) == 0 {
+				encontrada = true
+				p = m.particion3
+			}
+			if m.particion1.part_type == 'e' {
+				patrExtendida = 3
+				cantParticionExtendida++
+			}
+		}
+		if &m.particion4 != nil {
+			if bytes.Compare(name, m.particion4.part_name) == 0 {
+				encontrada = true
+				p = m.particion4
+			}
+			if m.particion1.part_type == 'e' {
+				patrExtendida = 4
+				cantParticionExtendida++
+			}
+		}
+		if !encontrada {
+			if cantParticionExtendida > 0 {
+				e := EBR{}
+				ebrAnterior := EBR{}
+				//start donde inicia el primer EBR
+				var start int64 = 0
+				//var sizeextend int64 = 0
+				//sizeextend
+				switch patrExtendida {
+				case 1:
+					start = int64(unsafe.Sizeof(m))
+					//sizeextend = m.particion1.part_size
+				case 2:
+					start = int64(unsafe.Sizeof(m)) + int64(part1size)
+					//sizeextend = m.particion2.part_size
+				case 3:
+					start = int64(unsafe.Sizeof(m)) + int64(part1size) + int64(part2size)
+					//sizeextend = m.particion3.part_size
+				case 4:
+					start = int64(unsafe.Sizeof(m)) + int64(part1size) + int64(part2size) + int64(part3size)
+					//sizeextend = m.particion4.part_size
+				default:
+				}
+
+				//Buscando particion logica
+				file.Seek(start, 0)
+				var sizeEBR int = int(unsafe.Sizeof(e))
+				dataEBR := leerBytes(file, sizeEBR)
+				bufferEBR := bytes.NewBuffer(dataEBR)
+				err = binary.Read(bufferEBR, binary.BigEndian, &e)
+				if err != nil {
+					log.Fatal("binary.Read failed", err)
+				}
+				for {
+					if bytes.Compare(e.part_name, name) != 0 {
+						ebrAnterior = e
+						if e.part_next != -1 {
+							file.Seek(e.part_next, 0)
+							data = leerBytes(file, sizeEBR)
+							err = binary.Read(bufferEBR, binary.BigEndian, &e)
+						} else {
+							fmt.Println("Particion no encontrada")
+							return particionesMontadas
+						}
+					} else {
+						break
+					}
+
+				}
+				disco := ' '
+				part := 1
+				if len(particionesMontadas) == 0 {
+					disco = 'a'
+				}
+				mismoDisco := false
+				ultimoDisco := ' '
+				for i := 0; i < len(particionesMontadas); i++ {
+					if path == particionesMontadas[i].pathM {
+						mismoDisco = true
+						disco = rune(particionesMontadas[i].id[2])
+						part = int(particionesMontadas[i].id[3]) + 1
+					}
+					if i == len(particionesMontadas)-1 {
+						ultimoDisco = rune(particionesMontadas[i].id[2])
+					}
+				}
+
+				if disco == ' ' {
+					disco = rune(int(ultimoDisco) + 1)
+				}
+				montar := MOUNTPart{}
+				if &p != nil {
+					montar = MOUNTPart{
+						id:        []byte("vd" + string(disco) + string(part)),
+						pathM:     path,
+						particion: p,
+					}
+				} else {
+					montar = MOUNTPart{
+						id:    []byte("vd" + string(disco) + string(part)),
+						pathM: path,
+						ebr:   e,
+					}
+				}
+
+				particionesMontadas = append(particionesMontadas, montar)
+
+			} else {
+				fmt.Println("No se encontro particion")
+				return particionesMontadas
+			}
+		}
+	} else {
+		fmt.Println("Faltan Parametros")
+		return particionesMontadas
+	}
+	return particionesMontadas
+
 }

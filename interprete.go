@@ -132,6 +132,7 @@ func lineaComando(comando string) {
 }
 
 func ejecutarComando(commandArray []string) {
+	particionesMontadas := []disco.MOUNTPart{}
 	data := strings.ToLower(commandArray[0])
 	if data == "mkdisk" {
 		disco.MKDISK(commandArray)
@@ -149,9 +150,9 @@ func ejecutarComando(commandArray []string) {
 		disco.RMDISK(commandArray)
 
 	} else if data == "fdisk" {
-
+		disco.FDISK(commandArray)
 	} else if data == "mount" {
-
+		particionesMontadas = disco.MOUNT(commandArray, particionesMontadas)
 	} else if data == "unmount" {
 
 	} else if data == "mkfs" {
